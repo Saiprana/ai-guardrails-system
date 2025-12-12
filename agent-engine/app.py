@@ -24,10 +24,10 @@ CORS(app)
 
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'localhost'),
-    'port': os.getenv('DB_PORT', '5432'),
+    'port': os.getenv('DB_PORT', '5434'),
     'database': os.getenv('DB_NAME', 'guardrails_db'),
     'user': os.getenv('DB_USER', 'postgres'),
-    'password': os.getenv('DB_PASSWORD', 'postgres')
+    'password': os.getenv('DB_PASSWORD', 'Saipranavi99')
 }
 
 def get_db_connection():
