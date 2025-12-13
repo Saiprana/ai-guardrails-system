@@ -29,6 +29,18 @@ DB_CONFIG = {
     'user': os.getenv('DB_USER', 'postgres'),
     'password': os.getenv('DB_PASSWORD', 'Saipranavi99')
 }
+# Try
+from decimal import Decimal
+
+def json_safe(obj):
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, dict):
+        return {k: json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [json_safe(v) for v in obj]
+    return obj
+
 
 def get_db_connection():
     """Get PostgreSQL database connection"""
@@ -526,7 +538,21 @@ def execute_query():
         )
         
         # STEP 5: Format Response
-        return jsonify({
+        # return jsonify({
+        #     "response": masked_data,
+        #     "hooks_triggered": pre_result['hooks_triggered'] + post_result['hooks_triggered'],
+        #     "data_masked": len(post_result['masked_fields']) > 0,
+        #     "blocked": False,
+        #     "risk_score": pre_result['risk_score'],
+        #     "audit_id": audit_id,
+        #     "metadata": {
+        #         "total_results": len(masked_data),
+        #         "tools_used": active_tools,
+        #         "tools_blocked": pre_result['tools_blocked']
+        #     }
+        # })
+        #Try
+        safe_response = json_safe({
             "response": masked_data,
             "hooks_triggered": pre_result['hooks_triggered'] + post_result['hooks_triggered'],
             "data_masked": len(post_result['masked_fields']) > 0,
@@ -539,6 +565,9 @@ def execute_query():
                 "tools_blocked": pre_result['tools_blocked']
             }
         })
+
+        return jsonify(safe_response)
+
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
