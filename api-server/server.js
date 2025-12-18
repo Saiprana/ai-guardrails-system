@@ -261,6 +261,50 @@ app.put('/api/guardrails/:id', async (req, res) => {
     }
 });
 
+app.put('/api/guardrails/:id/toggle', async (req, res) => {
+  const { id } = req.params;
+  const { enabled } = req.body;
+
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({
+      success: false,
+      error: 'enabled must be boolean'
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      UPDATE guardrail_rules
+      SET enabled = $1
+      WHERE id = $2
+      RETURNING id, rule_name, enabled
+      `,
+      [enabled, id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Guardrail not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Toggle guardrail error:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update guardrail'
+    });
+  }
+});
+
+
+
 /**
  * DELETE /api/guardrails/:id
  * Delete a guardrail rule

@@ -52,15 +52,6 @@ class CustomJSONProvider(DefaultJSONProvider):
 
 app.json = CustomJSONProvider(app)
 
-# def serialize_decimals(obj):
-#     if isinstance(obj, list):
-#         return [serialize_decimals(i) for i in obj]
-#     if isinstance(obj, dict):
-#         return {k: serialize_decimals(v) for k, v in obj.items()}
-#     if isinstance(obj, Decimal):
-#         return float(obj)
-#     return obj
-# Trial 2
 from decimal import Decimal
 
 def serialize_decimals(obj):
@@ -123,42 +114,6 @@ class GuardrailEngine:
         return [dict(rule) for rule in rules]
     
     def execute_pre_hooks(self, query: str, user: Dict, tools: List[str]) -> Dict:
-        """
-        Execute pre-hooks before tool invocation
-        
-        Returns:
-            {
-                "allowed": bool,
-                "modified_query": str,
-                "tools_blocked": [str],
-                "hooks_triggered": [str],
-                "reason": str,
-                "risk_score": int
-            }
-        """
-        pre_result = guardrail_engine.execute_pre_hooks(query, user, tools)
-
-        if "block_unauthorized_salary_access" in pre_result["hooks_triggered"]:
-            audit_id = log_audit_event(
-                user_id, user['username'], query,
-                tools[0] if tools else 'none',
-                pre_result['hooks_triggered'],
-                'blocked',
-                False, True,
-                90,
-                "You do not have permission to access salary information",
-                {'forced_block': True}
-            )
-
-            return jsonify({
-                "response": "You do not have permission to access salary information",
-                "hooks_triggered": pre_result["hooks_triggered"],
-                "data_masked": False,
-                "blocked": True,
-                "risk_score": 90,
-                "audit_id": audit_id
-            })
-        
         result = {
             "allowed": True,
             "modified_query": query,
@@ -167,136 +122,60 @@ class GuardrailEngine:
             "reason": "",
             "risk_score": 0
         }
-        
-        # Load applicable guardrails
-        guardrails = self.load_active_guardrails(user['role'])
-        pre_hooks = [g for g in guardrails if g['rule_type'] == 'pre_hook']
-        
-        for hook in pre_hooks:
-            # TODO: Implement trigger condition checking
-            # Check if query matches trigger_condition
-            
-            trigger = hook['trigger_condition']
-            # Trial
-            keywords = trigger.get('keywords', [])
-            # trigger_tools = trigger.get('tools', [])
-            
-            # Check keywords
-            # if 'keywords' in trigger:
-            #     if self._contains_keywords(query, trigger['keywords']):
-            # Trial
+
+        query_lower = query.lower()
+
+        # Load ENABLED pre-hooks for this role
+        guardrails = self.load_active_guardrails(user["role"])
+        pre_hooks = [
+            g for g in guardrails
+            if g["rule_type"] == "pre_hook" and g["enabled"]
+        ]
+
+        for rule in pre_hooks:
+            trigger = rule["trigger_condition"]
+            keywords = trigger.get("keywords", [])
+            tools_trigger = trigger.get("tools", [])
+
+            # ---------- Keyword trigger ----------
             if keywords and self._contains_keywords(query, keywords):
-                    result['hooks_triggered'].append(hook['rule_name'])
-                    
-                    # Apply action based on rule
+                result["hooks_triggered"].append(rule["rule_name"])
 
-                    # if hook['action'] == 'block':
-                    
-                        # TODO: Implement blocking logic
-                        # - Check if user has permission
-                        # - Special handling for "allow_own_salary"
-                    # Trial 1
-                    # allow_own = hook['config'].get('allow_own_salary', False)
-                    # if allow_own and user.get('employee_id'):
-                    #     # if asking about own name, allow
-                    #     if user['username'].split('_')[0].lower() in query.lower():
-                    #         continue
+                # Respect target_roles
+                if user["role"] not in rule["target_roles"]:
+                    continue
 
-                    # result['allowed'] = False
-                    # result['reason'] = hook['config'].get('error_message', 'Access denied')
-                    # result['risk_score'] = 90
-                    # return result
-                    # Trial 2
-                    # Employees cannot query others' salaries → BLOCK
-                    # if user['role'] == 'employee':
-                    #     result['allowed'] = False
-                    #     result['reason'] = hook['config'].get(
-                    #         'error_message',
-                    #         'You do not have permission to access salary information'
-                    #     )
-                    #     result['risk_score'] = 90
-                    #     return result
+                # ---------- BLOCK ----------
+                if rule["action"] == "block":
+                    result.update({
+                        "allowed": False,
+                        "reason": rule["config"].get(
+                            "error_message",
+                            "Access denied"
+                        ),
+                        "risk_score": 90
+                    })
+                    return result
 
-                    # # Managers/Admins → ALLOW but enforce post-hook filtering & masking
-                    # result['risk_score'] = max(result['risk_score'], 70)
-                    # Trial 3
-                    # Extract employee names from query
-                    # names = re.findall(self.employee_name_pattern, query)
+                # ---------- REQUIRE APPROVAL ----------
+                if rule["action"] == "require_approval":
+                    result.update({
+                        "allowed": False,
+                        "reason": "Access denied – approval required",
+                        "risk_score": 80
+                    })
+                    return result
 
-                    # if names:
-                    #     target_name = names[0]
+            # ---------- Tool-based trigger (Scenario 3) ----------
+            if tools_trigger:
+                if any(t in tools for t in tools_trigger) and self._detect_internal_data(query):
+                    result["tools_blocked"].extend(tools_trigger)
+                    result["hooks_triggered"].append(rule["rule_name"])
+                    result["risk_score"] = 95
 
-                    #     # Lookup employee
-                    #     conn = get_db_connection()
-                    #     cur = conn.cursor()
-                    #     cur.execute(
-                    #         "SELECT id, manager_id FROM employees WHERE name ILIKE %s",
-                    #         (target_name,)
-                    #     )
-                    #     target = cur.fetchone()
-                    #     cur.close()
-                    #     conn.close()
-
-                    #     if target:
-                    #         target_employee_id = target['id']
-                    #         target_manager_id = target['manager_id']
-
-                    #         # Admin always allowed
-                    #         if user['role'] == 'admin':
-                    #             continue
-
-                    #         # Manager: allow only if direct manager
-                    #         if user['role'] == 'manager':
-                    #             if user.get('employee_id') != target_manager_id:
-                    #                 # result['allowed'] = False
-                    #                 # result['reason'] = "You do not have permission to access salary information"
-                    #                 # result['risk_score'] = 90
-                    #                 # result['hooks_triggered'].append(hook['rule_name'])
-                    #                 # return result
-                    #                 result.update({
-                    #                     "allowed": False,
-                    #                     "reason": "You do not have permission to access salary information",
-                    #                     "risk_score": 90,
-                    #                     "hooks_triggered": [hook["rule_name"]]
-                    #                 })
-                    #                 return result
-
-                    #         # Employee: never allowed unless own salary
-                    #         if user['role'] == 'employee':
-                    #             if user.get('employee_id') != target_employee_id:
-                    #                 result['allowed'] = False
-                    #                 result['reason'] = "You do not have permission to access salary information"
-                    #                 result['risk_score'] = 90
-                    #                 result['hooks_triggered'].append(hook['rule_name'])
-                    #                 return result
-                    # Trila 4
-                    if keywords and self._contains_keywords(query, keywords):
-                        result.update({
-                            "allowed": False,
-                            "reason": hook["config"].get(
-                                "error_message",
-                                "You do not have permission to access salary information"
-                            ),
-                            "risk_score": 90
-                        })
-                        result["hooks_triggered"].append(hook["rule_name"])
-                        return result  
-
-                    # break
-            
-            # Check for web_search with internal data
-            if 'web_search' in tools and self._detect_internal_data(query):
-                result['tools_blocked'].append('web_search')
-                result['hooks_triggered'].append('prevent_data_leakage_websearch')
-                result['allowed'] = False
-                result['reason'] = 'Cannot use web search with internal employee data'
-                result['risk_score'] = 95
-                return result
-        
         return result
-    
 
-    
+
     def execute_post_hooks(self, response_data: Any, user: Dict, tool_used: str) -> Dict:
         """
         Execute post-hooks after tool invocation
@@ -467,14 +346,6 @@ class ToolSimulator:
         cur.close()
         conn.close()
         
-        # return {
-        #     "data": [dict(row) for row in results],
-        #     "metadata": {
-        #         "count": len(results),
-        #         "query_type": "select",
-        #         "tool": "database_query"
-        #     }
-        # }
         # Trial
         return {
             "data": data,
@@ -859,6 +730,44 @@ def get_test_scenarios():
             }
         ]
     })
+
+@app.route('/api/guardrails/<int:rule_id>/toggle', methods=['PUT'])
+def toggle_guardrail(rule_id):
+    try:
+        data = request.json
+        enabled = data.get('enabled')
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            UPDATE guardrails
+            SET enabled = %s
+            WHERE id = %s
+            RETURNING id, rule_name, enabled
+        """, (enabled, rule_id))
+
+        updated = cur.fetchone()
+        conn.commit()
+
+        cur.close()
+        conn.close()
+
+        if not updated:
+            return jsonify({"error": "Guardrail not found"}), 404
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "id": updated[0],
+                "rule_name": updated[1],
+                "enabled": updated[2]
+            }
+        })
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 # ============================================================================
 # MAIN

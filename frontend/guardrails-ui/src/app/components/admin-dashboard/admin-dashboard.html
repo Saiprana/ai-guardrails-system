@@ -1,1 +1,39 @@
-<p>admin-dashboard works!</p>
+<h2>Guardrail Rules</h2>
+
+<div *ngIf="loading">Loading guardrails...</div>
+
+<div *ngIf="error" class="error">
+  {{ error }}
+</div>
+
+<table *ngIf="!loading && guardrails.length">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Type</th>
+      <th>Action</th>
+      <th>Target Roles</th>
+      <th>Enabled</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    <tr *ngFor="let rule of guardrails">
+      <td>{{ rule.rule_name }}</td>
+      <td>{{ rule.rule_type }}</td>
+      <td>{{ rule.action }}</td>
+      <td>{{ rule.target_roles?.join(', ') }}</td>
+      <td>
+        <input
+          type="checkbox"
+          [checked]="rule.enabled"
+          (change)="toggle(rule)"
+        />
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<div *ngIf="!loading && guardrails.length === 0">
+  No guardrails found.
+</div>
