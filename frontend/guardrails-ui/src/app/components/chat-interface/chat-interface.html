@@ -1,1 +1,116 @@
-<p>chat-interface works!</p>
+<div class="chat-container">
+  <h2>AI Guardrails Chat</h2>
+
+  <!-- User Selector -->
+  <label>User</label>
+  <select [(ngModel)]="selectedUserId">
+    <option *ngFor="let u of users" [value]="u.id">
+      {{ u.label }}
+    </option>
+  </select>
+
+  <!-- Tool Selector -->
+  <label>Tools</label>
+  <div class="tools">
+    <label>
+      <input
+        type="checkbox"
+        [checked]="selectedTools.includes('database_query')"
+        (change)="toggleTool('database_query', $event.target.checked)"
+      />
+      Database Query
+    </label>
+
+    <label>
+      <input
+        type="checkbox"
+        [checked]="selectedTools.includes('web_search')"
+        (change)="toggleTool('web_search', $event.target.checked)"
+      />
+      Web Search
+    </label>
+  </div>
+
+
+  <!-- Query Input -->
+  <label>Query</label>
+  <textarea
+    rows="4"
+    [(ngModel)]="query"
+    placeholder="Ask a question about employees, salaries, departments..."
+  ></textarea>
+
+  <!-- Send Button -->
+  <button (click)="sendQuery()" [disabled]="loading">
+    {{ loading ? 'Processing...' : 'Send Query' }}
+  </button>
+
+  <!-- Error -->
+  <div class="error" *ngIf="errorMessage">
+    {{ errorMessage }}
+  </div>
+
+  <!-- Response -->
+  <!-- <div class="response" *ngIf="auditId">
+    <h3>Response</h3>
+
+    <pre *ngIf="responseData">{{ responseData | json }}</pre>
+    <p *ngIf="!responseData">No data returned</p>
+
+    <div class="badges">
+      <span class="badge blocked" *ngIf="blocked">BLOCKED</span>
+      <span class="badge masked" *ngIf="dataMasked">DATA MASKED</span>
+      <span class="badge risk">Risk Score: {{ riskScore }}</span>
+      <span class="badge audit">Audit ID: {{ auditId }}</span>
+    </div>
+
+    <div *ngIf="hooksTriggered.length">
+      <h4>Hooks Triggered</h4>
+      <ul>
+        <li *ngFor="let hook of hooksTriggered">{{ hook }}</li>
+      </ul>
+    </div>
+  </div> -->
+  <div *ngIf="loading" class="loading">
+    Processing query...
+  </div>
+
+  <!-- BLOCKED RESPONSE -->
+  <div *ngIf="!loading && isBlocked" class="blocked">
+    <h3>🚫 Access Denied</h3>
+    <p>{{ responseData }}</p>
+
+    <div class="meta">
+      <span>Risk Score: {{ riskScore }}</span>
+      <span>Audit ID: {{ auditId }}</span>
+    </div>
+  </div>
+
+  <!-- ALLOWED RESPONSE -->
+  <div *ngIf="!loading && !isBlocked && responseData">
+    <h3>Response</h3>
+
+    <pre *ngIf="responseData | json">
+  {{ responseData | json }}
+    </pre>
+
+    <div class="badges">
+      <span *ngIf="dataMasked" class="badge masked">DATA MASKED</span>
+      <span class="badge risk">Risk Score: {{ riskScore }}</span>
+      <span class="badge audit">Audit ID: {{ auditId }}</span>
+    </div>
+
+    <div class="hooks">
+      <h4>Hooks Triggered</h4>
+      <ul>
+        <li *ngFor="let hook of hooksTriggered">{{ hook }}</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ERROR -->
+  <div *ngIf="errorMessage" class="error">
+    {{ errorMessage }}
+  </div>
+
+</div>

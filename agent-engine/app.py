@@ -52,14 +52,33 @@ class CustomJSONProvider(DefaultJSONProvider):
 
 app.json = CustomJSONProvider(app)
 
+# def serialize_decimals(obj):
+#     if isinstance(obj, list):
+#         return [serialize_decimals(i) for i in obj]
+#     if isinstance(obj, dict):
+#         return {k: serialize_decimals(v) for k, v in obj.items()}
+#     if isinstance(obj, Decimal):
+#         return float(obj)
+#     return obj
+# Trial 2
+from decimal import Decimal
+
 def serialize_decimals(obj):
-    if isinstance(obj, list):
-        return [serialize_decimals(i) for i in obj]
-    if isinstance(obj, dict):
-        return {k: serialize_decimals(v) for k, v in obj.items()}
+    
     if isinstance(obj, Decimal):
         return float(obj)
+
+    if isinstance(obj, list):
+        return [serialize_decimals(item) for item in obj]
+
+    if isinstance(obj, dict):
+        return {
+            key: serialize_decimals(value)
+            for key, value in obj.items()
+        }
+
     return obj
+
 
 def extract_salary_threshold(query: str):
     match = re.search(r'over\s*\$?(\d+)', query.lower())
@@ -117,6 +136,29 @@ class GuardrailEngine:
                 "risk_score": int
             }
         """
+        pre_result = guardrail_engine.execute_pre_hooks(query, user, tools)
+
+        if "block_unauthorized_salary_access" in pre_result["hooks_triggered"]:
+            audit_id = log_audit_event(
+                user_id, user['username'], query,
+                tools[0] if tools else 'none',
+                pre_result['hooks_triggered'],
+                'blocked',
+                False, True,
+                90,
+                "You do not have permission to access salary information",
+                {'forced_block': True}
+            )
+
+            return jsonify({
+                "response": "You do not have permission to access salary information",
+                "hooks_triggered": pre_result["hooks_triggered"],
+                "data_masked": False,
+                "blocked": True,
+                "risk_score": 90,
+                "audit_id": audit_id
+            })
+        
         result = {
             "allowed": True,
             "modified_query": query,
@@ -137,7 +179,7 @@ class GuardrailEngine:
             trigger = hook['trigger_condition']
             # Trial
             keywords = trigger.get('keywords', [])
-            trigger_tools = trigger.get('tools', [])
+            # trigger_tools = trigger.get('tools', [])
             
             # Check keywords
             # if 'keywords' in trigger:
@@ -166,17 +208,80 @@ class GuardrailEngine:
                     # return result
                     # Trial 2
                     # Employees cannot query others' salaries → BLOCK
-                    if user['role'] == 'employee':
-                        result['allowed'] = False
-                        result['reason'] = hook['config'].get(
-                            'error_message',
-                            'You do not have permission to access salary information'
-                        )
-                        result['risk_score'] = 90
-                        return result
+                    # if user['role'] == 'employee':
+                    #     result['allowed'] = False
+                    #     result['reason'] = hook['config'].get(
+                    #         'error_message',
+                    #         'You do not have permission to access salary information'
+                    #     )
+                    #     result['risk_score'] = 90
+                    #     return result
 
-                    # Managers/Admins → ALLOW but enforce post-hook filtering & masking
-                    result['risk_score'] = max(result['risk_score'], 70)
+                    # # Managers/Admins → ALLOW but enforce post-hook filtering & masking
+                    # result['risk_score'] = max(result['risk_score'], 70)
+                    # Trial 3
+                    # Extract employee names from query
+                    # names = re.findall(self.employee_name_pattern, query)
+
+                    # if names:
+                    #     target_name = names[0]
+
+                    #     # Lookup employee
+                    #     conn = get_db_connection()
+                    #     cur = conn.cursor()
+                    #     cur.execute(
+                    #         "SELECT id, manager_id FROM employees WHERE name ILIKE %s",
+                    #         (target_name,)
+                    #     )
+                    #     target = cur.fetchone()
+                    #     cur.close()
+                    #     conn.close()
+
+                    #     if target:
+                    #         target_employee_id = target['id']
+                    #         target_manager_id = target['manager_id']
+
+                    #         # Admin always allowed
+                    #         if user['role'] == 'admin':
+                    #             continue
+
+                    #         # Manager: allow only if direct manager
+                    #         if user['role'] == 'manager':
+                    #             if user.get('employee_id') != target_manager_id:
+                    #                 # result['allowed'] = False
+                    #                 # result['reason'] = "You do not have permission to access salary information"
+                    #                 # result['risk_score'] = 90
+                    #                 # result['hooks_triggered'].append(hook['rule_name'])
+                    #                 # return result
+                    #                 result.update({
+                    #                     "allowed": False,
+                    #                     "reason": "You do not have permission to access salary information",
+                    #                     "risk_score": 90,
+                    #                     "hooks_triggered": [hook["rule_name"]]
+                    #                 })
+                    #                 return result
+
+                    #         # Employee: never allowed unless own salary
+                    #         if user['role'] == 'employee':
+                    #             if user.get('employee_id') != target_employee_id:
+                    #                 result['allowed'] = False
+                    #                 result['reason'] = "You do not have permission to access salary information"
+                    #                 result['risk_score'] = 90
+                    #                 result['hooks_triggered'].append(hook['rule_name'])
+                    #                 return result
+                    # Trila 4
+                    if keywords and self._contains_keywords(query, keywords):
+                        result.update({
+                            "allowed": False,
+                            "reason": hook["config"].get(
+                                "error_message",
+                                "You do not have permission to access salary information"
+                            ),
+                            "risk_score": 90
+                        })
+                        result["hooks_triggered"].append(hook["rule_name"])
+                        return result  
+
                     # break
             
             # Check for web_search with internal data
@@ -186,8 +291,11 @@ class GuardrailEngine:
                 result['allowed'] = False
                 result['reason'] = 'Cannot use web search with internal employee data'
                 result['risk_score'] = 95
+                return result
         
         return result
+    
+
     
     def execute_post_hooks(self, response_data: Any, user: Dict, tool_used: str) -> Dict:
         """

@@ -1,0 +1,101 @@
+.chat-container {
+  max-width: 800px;
+  margin: 40px auto;
+  padding: 20px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+label {
+  display: block;
+  margin-top: 12px;
+  font-weight: bold;
+}
+
+textarea,
+select {
+  width: 100%;
+  padding: 8px;
+  margin-top: 6px;
+}
+
+.tools {
+  display: flex;
+  gap: 16px;
+  margin-top: 6px;
+}
+
+button {
+  margin-top: 16px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+.response {
+  margin-top: 24px;
+  background: #fafafa;
+  padding: 16px;
+  border-radius: 4px;
+}
+
+.badges {
+  margin-top: 10px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  margin-right: 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.badge.blocked {
+  background: #ffdddd;
+  color: #900;
+}
+
+.badge.masked {
+  background: #fff4cc;
+  color: #8a6d00;
+}
+
+.badge.risk {
+  background: #ddeeff;
+}
+
+.badge.audit {
+  background: #e6e6e6;
+}
+
+.error {
+  color: red;
+  margin-top: 10px;
+}
+
+.blocked {
+  border: 2px solid #e53935;
+  padding: 1rem;
+  background: #fff5f5;
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  margin-right: 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.masked {
+  background: #ffeb3b;
+}
+
+.risk {
+  background: #ff9800;
+}
+
+.audit {
+  background: #e0e0e0;
+}
+
