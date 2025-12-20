@@ -48,6 +48,7 @@ button {
   margin-right: 6px;
   border-radius: 4px;
   font-size: 12px;
+  font-weight: bold;
 }
 
 .badge.blocked {
@@ -89,10 +90,11 @@ button {
 
 .masked {
   background: #ffeb3b;
+  color: #856404;
 }
 
 .risk {
-  background: #ff9800;
+  background:  #e0e0e0;
 }
 
 .audit {

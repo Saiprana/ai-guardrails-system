@@ -114,6 +114,20 @@ class GuardrailEngine:
         return [dict(rule) for rule in rules]
     
     def execute_pre_hooks(self, query: str, user: Dict, tools: List[str]) -> Dict:
+        """
+        Execute pre-hooks before tool invocation.
+
+        Returns:
+            {
+                "allowed": bool,
+                "modified_query": str,
+                "tools_blocked": [str],
+                "hooks_triggered": [str],
+                "reason": str,
+                "risk_score": int
+            }
+        """
+
         result = {
             "allowed": True,
             "modified_query": query,
@@ -123,57 +137,108 @@ class GuardrailEngine:
             "risk_score": 0
         }
 
-        query_lower = query.lower()
-
-        # Load ENABLED pre-hooks for this role
+        # Load ONLY enabled rules for this role
         guardrails = self.load_active_guardrails(user["role"])
+
         pre_hooks = [
             g for g in guardrails
-            if g["rule_type"] == "pre_hook" and g["enabled"]
+            if g["rule_type"] == "pre_hook"
         ]
+
+        query_lower = query.lower()
 
         for rule in pre_hooks:
             trigger = rule["trigger_condition"]
             keywords = trigger.get("keywords", [])
             tools_trigger = trigger.get("tools", [])
 
-            # ---------- Keyword trigger ----------
-            if keywords and self._contains_keywords(query, keywords):
-                result["hooks_triggered"].append(rule["rule_name"])
+            keyword_match = keywords and any(k in query_lower for k in keywords)
+            tool_match = not tools_trigger or any(t in tools for t in tools_trigger)
 
-                # Respect target_roles
-                if user["role"] not in rule["target_roles"]:
-                    continue
+            if not keyword_match or not tool_match:
+                continue
 
-                # ---------- BLOCK ----------
-                if rule["action"] == "block":
-                    result.update({
-                        "allowed": False,
-                        "reason": rule["config"].get(
-                            "error_message",
-                            "Access denied"
-                        ),
-                        "risk_score": 90
-                    })
-                    return result
+            result["hooks_triggered"].append(rule["rule_name"])
 
-                # ---------- REQUIRE APPROVAL ----------
-                if rule["action"] == "require_approval":
-                    result.update({
-                        "allowed": False,
-                        "reason": "Access denied – approval required",
-                        "risk_score": 80
-                    })
-                    return result
+            if rule["action"] == "block":
+                result["allowed"] = False
+                result["reason"] = rule["config"].get(
+                    "error_message",
+                    "Access denied"
+                )
+                result["risk_score"] = 90
+                return result
 
-            # ---------- Tool-based trigger (Scenario 3) ----------
-            if tools_trigger:
-                if any(t in tools for t in tools_trigger) and self._detect_internal_data(query):
-                    result["tools_blocked"].extend(tools_trigger)
-                    result["hooks_triggered"].append(rule["rule_name"])
-                    result["risk_score"] = 95
+            if rule["action"] == "require_approval":
+                result["allowed"] = False
+                result["reason"] = "Requires admin approval"
+                result["risk_score"] = 80
+                return result
+
+        # Web search leakage = tool blocked, NOT full block
+        if "web_search" in tools and self._detect_internal_data(query):
+            result["tools_blocked"].append("web_search")
+            result["hooks_triggered"].append("prevent_data_leakage_websearch")
+            result["risk_score"] = 95
 
         return result
+        # Trial
+        # for rule in pre_hooks:
+        #     trigger = rule.get("trigger_condition", {})
+        #     rule_name = rule["rule_name"]
+        #     action = rule["action"]
+        #     config = rule.get("config", {})
+
+        #     # 1. Keyword-based triggers
+        #     keywords = trigger.get("keywords", [])
+        #     if keywords and not self._contains_keywords(query_lower, keywords):
+        #         continue
+
+        #     # 2. Tool-based triggers
+        #     trigger_tools = trigger.get("tools", [])
+        #     if trigger_tools and not any(t in tools for t in trigger_tools):
+        #         continue
+
+        #     # 3. Context-based triggers (web search leakage)
+        #     if rule_name == "prevent_data_leakage_websearch":
+        #         if "web_search" in tools and self._detect_internal_data(query):
+        #             result["tools_blocked"].append("web_search")
+        #             result["hooks_triggered"].append(rule_name)
+        #             result["risk_score"] = max(result["risk_score"], 95)
+        #         continue  
+
+        #     # 4. BLOCK actions
+        #     if action == "block":
+        #         # Allow-own-salary exception
+        #         if config.get("allow_own_salary") and user.get("employee_id"):
+        #             employee_name = user["username"].split("_")[0]
+        #             if employee_name.lower() in query_lower:
+        #                 continue
+
+        #         result.update({
+        #             "allowed": False,
+        #             "reason": config.get(
+        #                 "error_message",
+        #                 "You do not have permission to access this information"
+        #             ),
+        #             "risk_score": max(result["risk_score"], 90)
+        #         })
+
+        #         result["hooks_triggered"].append(rule_name)
+        #         return result  
+
+        #     # 5. REQUIRE APPROVAL
+        #     if action == "require_approval":
+        #         result.update({
+        #             "allowed": False,
+        #             "reason": "This request requires admin approval",
+        #             "risk_score": max(result["risk_score"], 80)
+        #         })
+        #         result["hooks_triggered"].append(rule_name)
+        #         return result
+
+        # return result
+
 
 
     def execute_post_hooks(self, response_data: Any, user: Dict, tool_used: str) -> Dict:
@@ -558,7 +623,7 @@ def execute_query():
         user_id = data.get('user_id')
         query = data.get('query')
         tools = data.get('tools', ['database_query'])
-        context = data.get('context', {})
+        # context = data.get('context', {})
         
         # Fetch user information
         conn = get_db_connection()
@@ -569,22 +634,25 @@ def execute_query():
         row = cur.fetchone()
 
         if not row:
+            cur.close()
+            conn.close()
             return jsonify({"error": f"User {user_id} not found"}), 404
 
         user = dict(row)
         
         # Trial
-        if not user.get('department'):
+        if not user.get('department') and user.get('employee_id'):
             # Fallback: infer department from employee record
-            conn = get_db_connection()
-            cur = conn.cursor()
+            # conn = get_db_connection()
+            # cur = conn.cursor()
             cur.execute(
                 "SELECT department FROM employees WHERE id = %s",
-                (user.get('employee_id'),)
+                # (user.get('employee_id'),)
+                (user['employee_id'],)
             )
             emp = cur.fetchone()
-            cur.close()
-            conn.close()
+            # cur.close()
+            # conn.close()
 
             if emp:
                 user['department'] = emp['department']
@@ -599,11 +667,14 @@ def execute_query():
         if not pre_result['allowed']:
             # Query blocked by pre-hooks
             audit_id = log_audit_event(
-                user_id, user['username'], query, 
+                user_id, 
+                user['username'], 
+                query, 
                 tools[0] if tools else 'none',
                 pre_result['hooks_triggered'],
                 'blocked',
-                False, True,
+                False, 
+                True,
                 pre_result['risk_score'],
                 pre_result['reason'],
                 {'pre_hook_result': pre_result}
@@ -618,7 +689,7 @@ def execute_query():
                 "audit_id": audit_id
             })
         
-        # STEP 2: Execute Tool (simulate)
+        # STEP 2: Execute Tool
         active_tools = [t for t in tools if t not in pre_result['tools_blocked']]
         
         if 'database_query' in active_tools:
@@ -630,50 +701,55 @@ def execute_query():
         
         # STEP 3: Execute Post-Hooks
         post_result = guardrail_engine.execute_post_hooks(
-            tool_response['data'], user, active_tools[0] if active_tools else 'none'
+            tool_response['data'], 
+            user, 
+            active_tools[0] if active_tools else 'none'
         )
         
         # Apply filtering and masking
-        filtered_data = filter_by_department(post_result['filtered_response'], user)
-        masked_data = mask_salary_data(filtered_data, user)
+        # Trial
+        # filtered_data = filter_by_department(post_result['filtered_response'], user)
+        # masked_data = mask_salary_data(filtered_data, user)
+        active_rules = guardrail_engine.load_active_guardrails(user["role"])
+        active_rule_names = {r["rule_name"] for r in active_rules}
+
+        final_data = post_result["filtered_response"]
+
+        if "filter_cross_department_access" in active_rule_names:
+            final_data = filter_by_department(final_data, user)
+
+        if "mask_non_direct_report_salaries" in active_rule_names:
+            final_data = mask_salary_data(final_data, user)
         
+        # Trial ends
+
         # STEP 4: Log Audit Event
         audit_id = log_audit_event(
-            user_id, user['username'], query,
+            user_id, 
+            user['username'], 
+            query,
             active_tools[0] if active_tools else 'none',
             pre_result['hooks_triggered'] + post_result['hooks_triggered'],
             'allowed_filtered',
-            len(post_result['masked_fields']) > 0,
+            # len(post_result['masked_fields']) > 0,
+            any('salary' in str(x).lower() for x in final_data),
             False,
             pre_result['risk_score'],
-            f"Query executed successfully. {len(masked_data)} results returned.",
+            f"Query executed successfully. {len(final_data)} results returned.",
             {
                 'pre_hooks': pre_result,
                 'post_hooks': post_result,
                 'tools_used': active_tools
             }
         )
-        # Trial start
-        # STEP 5: Format Response
-        # return jsonify({
-        #     "response": masked_data,
-        #     "hooks_triggered": pre_result['hooks_triggered'] + post_result['hooks_triggered'],
-        #     "data_masked": len(post_result['masked_fields']) > 0,
-        #     "blocked": False,
-        #     "risk_score": pre_result['risk_score'],
-        #     "audit_id": audit_id,
-        #     "metadata": {
-        #         "total_results": len(masked_data),
-        #         "tools_used": active_tools,
-        #         "tools_blocked": pre_result['tools_blocked']
-        #     }
-        # })
-        safe_data = serialize_decimals(masked_data)
+        
+        safe_data = serialize_decimals(final_data)
 
         return jsonify({
             "response": safe_data,
             "hooks_triggered": pre_result['hooks_triggered'] + post_result['hooks_triggered'],
-            "data_masked": len(post_result['masked_fields']) > 0,
+            # "data_masked": len(post_result['masked_fields']) > 0,
+            "data_masked": any('salary_masked' in r for r in safe_data if isinstance(r, dict)),
             "blocked": False,
             "risk_score": pre_result['risk_score'],
             "audit_id": audit_id,
@@ -741,7 +817,7 @@ def toggle_guardrail(rule_id):
         cur = conn.cursor()
 
         cur.execute("""
-            UPDATE guardrails
+            UPDATE guardrails_rules
             SET enabled = %s
             WHERE id = %s
             RETURNING id, rule_name, enabled

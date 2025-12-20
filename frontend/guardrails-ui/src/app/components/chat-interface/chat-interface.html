@@ -72,7 +72,8 @@
     </div>
   </div> -->
   <div *ngIf="loading" class="loading">
-    Processing query...
+    <!-- Processing query... -->
+    ⏳ Running guardrails evaluation…
   </div>
 
   <!-- BLOCKED RESPONSE -->
@@ -98,6 +99,7 @@
       <span *ngIf="dataMasked" class="badge masked">DATA MASKED</span>
       <span class="badge risk">Risk Score: {{ riskScore }}</span>
       <span class="badge audit">Audit ID: {{ auditId }}</span>
+      <span *ngIf="blocked" class="badge blocked">BLOCKED</span>
     </div>
 
     <div class="hooks">
